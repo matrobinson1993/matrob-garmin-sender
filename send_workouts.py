@@ -227,12 +227,16 @@ def push_upcoming(api, sent):
         when = dt.date.fromisoformat(first) - dt.timedelta(days=(days or 1) - 1)
         return 0, None, (f"Nothing is due on your watch yet: your first workout is {nice(first)}. "
                          f"It will be sent to your watch automatically on {when.strftime('%a %-d %b')}.")
-    pushed, err, dev = 0, None, None
+    pushed, err, dev, gone = 0, None, None, set()
+    is_gone = lambda e: any(k in str(e) for k in ("404", "Not Found", "not found"))
     for _, wid in dict.fromkeys(due):
         try:
             call(fn, wid)
             pushed += 1
         except Exception as e:
+            if is_gone(e):
+                gone.add(wid)       # deleted in Garmin Connect: forget it instead of failing every day
+                continue
             dev = dev or _device_id(api)
             try:
                 if not dev:
@@ -240,7 +244,13 @@ def push_upcoming(api, sent):
                 call(fn, wid, dev)
                 pushed += 1
             except Exception as e2:
-                err = clean(e2)[:140]
+                if is_gone(e2):
+                    gone.add(wid)
+                else:
+                    err = clean(e2)[:140]
+    if gone:
+        sent[:] = [s for s in sent if s.get("workoutId") not in gone]
+        (STATE / "sent.json").write_text(json.dumps(sent, indent=1))
     span = "the whole plan" if days is None else f"the next {days} days"
     info = f"{pushed} workout{'s' if pushed != 1 else ''} for {span} sent to your watch." if pushed else ""
     return pushed, err, info
