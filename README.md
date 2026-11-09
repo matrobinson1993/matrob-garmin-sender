@@ -9,11 +9,13 @@ You don't need to do anything here. The app sets it up for you when you tap **Se
 1. The app saves your Garmin email and password as encrypted GitHub **secrets** in this repository. It's private to you.
 2. When you tap **Send to Garmin**, the app puts your workouts in `inbox/` and starts the **Send workouts to Garmin** workflow.
 3. GitHub runs `send_workouts.py`. It logs in to Garmin Connect, uploads each workout, puts it on its date in your Garmin calendar, and writes a result to `results/` that the app shows you.
-4. Sync your watch with the Garmin Connect app. The workouts appear in your calendar and under **Training → Workouts**.
+4. The next 7 days' workouts are sent straight to your watch. Every morning, the sender automatically sends the next 7 days, so your watch stays topped up without filling its storage. Sync with the Garmin Connect app as usual.
 
 The Garmin login is remembered between runs, so you only need to enter a 2-step verification code once in a while.
 
 ## Notes
+
+- **Updates are automatic.** The app keeps the files in this repository up to date with the template (`sender_version.txt`).
 
 - **Keep this repository private.** The app creates it private.
 - **Past-dated workouts are skipped.** Workouts dated today or later are scheduled on their dates.

@@ -1,8 +1,11 @@
 name: Send workouts to Garmin
 
-# Started by the MatRob Running Generator app. You can also run it from the
-# Actions tab (mode "login" just tests your Garmin login).
+# Started by the MatRob Running Generator app, and once a day on its own to
+# keep the next 7 days of workouts on your watch. You can also run it from
+# the Actions tab (mode "login" just tests your Garmin login).
 on:
+  schedule:
+    - cron: "23 18 * * *"   # every day: send the next 7 days' workouts to your watch
   workflow_dispatch:
     inputs:
       job:
@@ -10,7 +13,7 @@ on:
         required: false
         type: string
       mode:
-        description: "send, login, clean_sent or clean_all"
+        description: "send, login, push_week, clean_sent or clean_all"
         required: false
         default: send
         type: string
@@ -28,6 +31,8 @@ concurrency:
 
 jobs:
   send:
+    # never run in the shared public template, only in each user's private copy
+    if: github.repository != 'matrobinson1993/matrob-garmin-sender'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -55,7 +60,7 @@ jobs:
           GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
           GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
           JOB: ${{ inputs.job }}
-          MODE: ${{ inputs.mode }}
+          MODE: ${{ github.event_name == 'schedule' && 'push_week' || inputs.mode }}
           MFA_CODE: ${{ inputs.mfa_code }}
         run: python send_workouts.py
 

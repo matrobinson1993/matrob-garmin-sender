@@ -11,6 +11,7 @@ your Garmin calendar, and writes a result file the app reads back.
 Environment:
   GARMIN_EMAIL, GARMIN_PASSWORD   repository secrets (set by the app)
   MODE        "send" (default), "login" (just test the login),
+              "push_week" (send the next 7 days' workouts to your watch; runs daily),
               "clean_sent" (delete every workout this app sent) or
               "clean_all" (delete every workout in your Garmin workouts library)
   JOB         job id; reads inbox/<JOB>.json, writes results/<JOB>.json
@@ -32,6 +33,7 @@ PENDING = Path(os.path.expanduser("~/.garmin-pending/mfa.json"))  # half-finishe
 os.environ.setdefault("GARMINTOKENS", str(LOGIN_DIR))
 PAUSE = float(os.getenv("GARMIN_PAUSE", "0.6"))
 APP_TAG = "MatRob"
+PUSH_DAYS = 7   # how many days ahead to keep on the watch (watches only hold a limited number of workouts)
 
 _redact = [os.getenv("GARMIN_EMAIL") or "", os.getenv("GARMIN_PASSWORD") or ""]
 
@@ -163,6 +165,24 @@ def full_name(api):
         return None
 
 
+def push_upcoming(api, sent, days=PUSH_DAYS):
+    """Send workouts scheduled in the next `days` days straight to the watch (like tapping Send to Device)."""
+    fn = getattr(api, "push_workout_to_device", None)
+    if not callable(fn):
+        return 0, "this version of the Garmin library can't push to the watch"
+    today = dt.date.today()
+    last = (today + dt.timedelta(days=days - 1)).isoformat()
+    due = sorted({s["workoutId"] for s in sent if s.get("workoutId") and s.get("date") and today.isoformat() <= s["date"] <= last})
+    pushed, err = 0, None
+    for wid in due:
+        try:
+            call(fn, wid)
+            pushed += 1
+        except Exception as e:
+            err = clean(e)[:120]
+    return pushed, err
+
+
 def send(api, job):
     path = INBOX / f"{job}.json"
     if not path.exists():
@@ -224,6 +244,7 @@ def send(api, job):
     STATE.mkdir(exist_ok=True)
     sent_path.write_text(json.dumps(sent, indent=1))
     path.unlink()
+    pushed, push_err = push_upcoming(api, sent)
     parts = [f"{uploaded} workout{'s' if uploaded != 1 else ''} added to Garmin Connect"]
     if scheduled:
         parts.append(f"{scheduled} scheduled on their dates")
@@ -231,8 +252,12 @@ def send(api, job):
         parts.append(f"{skipped} past-dated skipped")
     if removed:
         parts.append(f"{removed} earlier ones replaced")
+    if pushed:
+        parts.append(f"{pushed} for the next {PUSH_DAYS} days sent straight to your watch")
+    if push_err and not pushed:
+        errors.append(f"Couldn't send to your watch automatically ({push_err}). Use Send to Device in Garmin Connect.")
     return {"status": "ok" if uploaded or not workouts else "error", "uploaded": uploaded, "scheduled": scheduled,
-            "skipped": skipped, "removed": removed, "errors": errors[:20],
+            "skipped": skipped, "removed": removed, "pushed": pushed, "errors": errors[:20],
             "message": ", ".join(parts) + "." + (f" {len(errors)} problem(s)." if errors else "")}
 
 
@@ -310,6 +335,13 @@ def main():
     try:
         if mode in ("clean_sent", "clean_all"):
             result = cleanup(api, "all" if mode == "clean_all" else "sent")
+        elif mode == "push_week":
+            sent_path = STATE / "sent.json"
+            sent = json.loads(sent_path.read_text()) if sent_path.exists() else []
+            pushed, err = push_upcoming(api, sent)
+            result = {"status": "ok" if pushed or not err else "error", "pushed": pushed,
+                      "message": (f"Sent {pushed} workout{'s' if pushed != 1 else ''} for the next {PUSH_DAYS} days to your watch."
+                                  if pushed else (f"Couldn't send to your watch: {err}" if err else f"No workouts in the next {PUSH_DAYS} days."))}
         else:
             result = send(api, job)
     except SystemExit as e:
